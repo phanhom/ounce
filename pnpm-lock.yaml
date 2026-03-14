@@ -256,6 +256,50 @@ importers:
         specifier: ^5.7.3
         version: 5.9.3
 
+  packages/worker:
+    dependencies:
+      '@paperclipai/adapter-utils':
+        specifier: workspace:*
+        version: link:../adapter-utils
+      ws:
+        specifier: ^8.18.0
+        version: 8.19.0
+    optionalDependencies:
+      '@paperclipai/adapter-claude-local':
+        specifier: workspace:*
+        version: link:../adapters/claude-local
+      '@paperclipai/adapter-codex-local':
+        specifier: workspace:*
+        version: link:../adapters/codex-local
+      '@paperclipai/adapter-cursor-local':
+        specifier: workspace:*
+        version: link:../adapters/cursor-local
+      '@paperclipai/adapter-gemini-local':
+        specifier: workspace:*
+        version: link:../adapters/gemini-local
+      '@paperclipai/adapter-openclaw-gateway':
+        specifier: workspace:*
+        version: link:../adapters/openclaw-gateway
+      '@paperclipai/adapter-opencode-local':
+        specifier: workspace:*
+        version: link:../adapters/opencode-local
+      '@paperclipai/adapter-pi-local':
+        specifier: workspace:*
+        version: link:../adapters/pi-local
+    devDependencies:
+      '@types/node':
+        specifier: ^24.6.0
+        version: 24.12.0
+      '@types/ws':
+        specifier: ^8.5.14
+        version: 8.18.1
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+
   server:
     dependencies:
       '@aws-sdk/client-s3':

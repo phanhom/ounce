@@ -137,3 +137,10 @@ export {
   type UpdateMemberPermissions,
   type UpdateUserCompanyAccess,
 } from "./access.js";
+
+export {
+  createWorkerSchema,
+  updateWorkerSchema,
+  type CreateWorker,
+  type UpdateWorker,
+} from "./worker.js";

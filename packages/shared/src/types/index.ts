@@ -61,6 +61,7 @@ export type {
   JoinRequest,
   InstanceUserRoleGrant,
 } from "./access.js";
+export type { Worker, WorkerCreated } from "./worker.js";
 export type {
   CompanyPortabilityInclude,
   CompanyPortabilitySecretRequirement,

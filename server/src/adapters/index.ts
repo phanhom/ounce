@@ -15,3 +15,4 @@ export type {
   AdapterRuntime,
 } from "@paperclipai/adapter-utils";
 export { runningProcesses } from "./utils.js";
+export { dispatchExecution, setWorkerRegistry, getWorkerRegistry } from "./dispatch.js";

@@ -1,0 +1,28 @@
+[Unit]
+Description=Paperclip Remote Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=paperclip
+ExecStart=/usr/bin/env node /usr/lib/node_modules/@paperclipai/worker/dist/main.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/paperclip/worker.env
+
+# The worker starts in beacon-only mode by default:
+#   - Listens on port 19820 for LAN discovery
+#   - Auto-generates a pairing key at ~/.paperclip/worker-key
+#   - No server URL or token required — pair from the Paperclip UI
+#
+# To read the pairing key after service start:
+#   cat ~paperclip/.paperclip/worker-key
+#
+# Optional: pre-configure outbound connection in /etc/paperclip/worker.env:
+#   PAPERCLIP_SERVER_URL=https://your-paperclip.example.com
+#   PAPERCLIP_WORKER_TOKEN=pclip_wk_...
+
+[Install]
+WantedBy=multi-user.target

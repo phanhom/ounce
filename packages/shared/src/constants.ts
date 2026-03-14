@@ -21,6 +21,9 @@ export const AGENT_STATUSES = [
 ] as const;
 export type AgentStatus = (typeof AGENT_STATUSES)[number];
 
+export const WORKER_STATUSES = ["online", "offline"] as const;
+export type WorkerStatus = (typeof WORKER_STATUSES)[number];
+
 export const AGENT_ADAPTER_TYPES = [
   "process",
   "http",

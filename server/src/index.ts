@@ -25,6 +25,9 @@ import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { logger } from "./middleware/logger.js";
 import { setupLiveEventsWebSocketServer } from "./realtime/live-events-ws.js";
+import { setupWorkerWebSocketServer } from "./realtime/worker-ws.js";
+import { WorkerRegistry } from "./services/worker-registry.js";
+import { setWorkerRegistry } from "./adapters/dispatch.js";
 import { heartbeatService, reconcilePersistedRuntimeServicesOnStartup } from "./services/index.js";
 import { createStorageServiceFromConfig } from "./storage/index.js";
 import { printStartupBanner } from "./startup-banner.js";
@@ -462,6 +465,9 @@ export async function startServer(): Promise<StartedServer> {
     authReady = true;
   }
   
+  const workerRegistry = new WorkerRegistry();
+  setWorkerRegistry(workerRegistry);
+
   const listenPort = await detectPort(config.port);
   const uiMode = config.uiDevMiddleware ? "vite-dev" : config.serveUi ? "static" : "none";
   const storageService = createStorageServiceFromConfig(config);
@@ -477,6 +483,7 @@ export async function startServer(): Promise<StartedServer> {
     companyDeletionEnabled: config.companyDeletionEnabled,
     betterAuthHandler,
     resolveSession,
+    workerRegistry,
   });
   const server = createServer(app as unknown as Parameters<typeof createServer>[0]);
   
@@ -497,6 +504,8 @@ export async function startServer(): Promise<StartedServer> {
     deploymentMode: config.deploymentMode,
     resolveSessionFromHeaders,
   });
+
+  setupWorkerWebSocketServer(server, db as any, workerRegistry);
 
   void reconcilePersistedRuntimeServicesOnStartup(db as any)
     .then((result) => {
