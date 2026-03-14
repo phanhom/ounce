@@ -21,6 +21,8 @@ export interface DiscoveredWorker {
   capabilities: string[];
   maxConcurrency: number;
   labels: Record<string, unknown>;
+  fingerprint: string;
+  publicKey: string;
   paired: boolean;
   version: string;
 }
@@ -138,6 +140,8 @@ async function fetchBeaconInfo(ip: string, port: number, timeoutMs: number): Pro
         typeof data.labels === "object" && data.labels !== null
           ? (data.labels as Record<string, unknown>)
           : {},
+      fingerprint: String(data.fingerprint ?? ""),
+      publicKey: String(data.publicKey ?? ""),
       paired: Boolean(data.paired),
       version: String(data.version ?? ""),
     };

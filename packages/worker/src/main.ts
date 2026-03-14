@@ -3,37 +3,45 @@ import { resolveConfig, type WorkerConfig } from "./config.js";
 import { detectCapabilities } from "./detect.js";
 import { registerCapabilities } from "./executor.js";
 import { WorkerConnection } from "./connection.js";
-import { WorkerBeacon, type PairRequest, type PairResult } from "./beacon.js";
-import { ensureWorkerKey, getKeyFilePath } from "./keygen.js";
+import { WorkerBeacon, type PairResult } from "./beacon.js";
+import { ensureKeyPair, getPublicKeyPath, getPrivateKeyPath } from "./keygen.js";
 
 let activeConnection: WorkerConnection | null = null;
 
-function banner(workerKey: string, port: number, capabilities: string[], config: WorkerConfig): void {
+function banner(fingerprint: string, port: number, capabilities: string[], config: WorkerConfig): void {
   const ips = getLocalIPs();
+  const w = 61;
+  const line = (label: string, value: string) =>
+    `│  ${label.padEnd(13)} │ ${value}`.padEnd(w) + "│";
+
   console.log("");
-  console.log("┌─────────────────────────────────────────────────────────┐");
-  console.log("│              Paperclip Remote Worker                    │");
-  console.log("├─────────────────────────────────────────────────────────┤");
-  console.log(`│  Platform     │ ${os.platform()} ${os.arch()} (Node ${process.version})`.padEnd(59) + "│");
-  console.log(`│  Hostname     │ ${os.hostname()}`.padEnd(59) + "│");
-  console.log(`│  Capabilities │ ${capabilities.join(", ") || "(none)"}`.padEnd(59) + "│");
-  console.log(`│  Concurrency  │ ${config.maxConcurrency}`.padEnd(59) + "│");
-  console.log(`│  Beacon Port  │ ${port}`.padEnd(59) + "│");
+  console.log("┌" + "─".repeat(w - 2) + "┐");
+  console.log("│" + "Paperclip Remote Worker".padStart(Math.floor((w - 2 + 23) / 2)).padEnd(w - 2) + "│");
+  console.log("├" + "─".repeat(w - 2) + "┤");
+  console.log(line("Platform", `${os.platform()} ${os.arch()} (Node ${process.version})`));
+  console.log(line("Hostname", os.hostname()));
+  console.log(line("Capabilities", capabilities.join(", ") || "(none)"));
+  console.log(line("Concurrency", String(config.maxConcurrency)));
+  console.log(line("Beacon Port", String(port)));
   for (const ip of ips) {
-    console.log(`│  LAN Address  │ ${ip}:${port}`.padEnd(59) + "│");
+    console.log(line("LAN Address", `${ip}:${port}`));
   }
-  console.log("├─────────────────────────────────────────────────────────┤");
+  console.log("├" + "─".repeat(w - 2) + "┤");
   if (config.server) {
-    console.log(`│  Server       │ ${config.server}`.padEnd(59) + "│");
-    console.log(`│  Status       │ outbound connection active`.padEnd(59) + "│");
+    console.log(line("Server", config.server));
+    console.log(line("Status", "outbound connection active"));
   } else {
-    console.log(`│  Status       │ awaiting pairing...`.padEnd(59) + "│");
+    console.log(line("Status", "awaiting pairing..."));
   }
-  console.log("├─────────────────────────────────────────────────────────┤");
-  console.log("│  Worker Key (use this to pair from Paperclip UI):      │");
-  console.log(`│  ${workerKey}`.padEnd(59) + "│");
-  console.log(`│  Key file: ${getKeyFilePath()}`.padEnd(59) + "│");
-  console.log("└─────────────────────────────────────────────────────────┘");
+  console.log("├" + "─".repeat(w - 2) + "┤");
+  console.log(line("Fingerprint", fingerprint));
+  console.log("│".padEnd(w) + "│");
+  console.log(`│  Use this fingerprint to verify the worker identity`.padEnd(w) + "│");
+  console.log(`│  when pairing from the Paperclip UI.`.padEnd(w) + "│");
+  console.log("│".padEnd(w) + "│");
+  console.log(`│  Private key: ${getPrivateKeyPath()}`.padEnd(w) + "│");
+  console.log(`│  Public key:  ${getPublicKeyPath()}`.padEnd(w) + "│");
+  console.log("└" + "─".repeat(w - 2) + "┘");
   console.log("");
 }
 
@@ -52,20 +60,21 @@ function getLocalIPs(): string[] {
 }
 
 async function handlePair(
-  req: PairRequest,
+  serverUrl: string,
   config: WorkerConfig,
   capabilities: string[],
+  companyId?: string,
+  workerName?: string,
 ): Promise<PairResult> {
   if (activeConnection) {
     activeConnection.stop();
     activeConnection = null;
   }
 
-  config.server = req.serverUrl;
-
-  const serverUrl = req.serverUrl.replace(/\/+$/, "");
-  const registerUrl = `${serverUrl}/api/workers/pair-accept`;
-  const workerKey = ensureWorkerKey();
+  config.server = serverUrl;
+  const url = serverUrl.replace(/\/+$/, "");
+  const registerUrl = `${url}/api/workers/pair-accept`;
+  const keyPair = ensureKeyPair();
 
   try {
     const response = await fetch(registerUrl, {
@@ -79,9 +88,10 @@ async function handlePair(
         capabilities,
         maxConcurrency: config.maxConcurrency,
         labels: config.labels,
-        workerKey,
-        companyId: req.companyId,
-        workerName: req.workerName,
+        publicKey: keyPair.publicKeyPem,
+        fingerprint: keyPair.fingerprint,
+        companyId,
+        workerName,
       }),
     });
 
@@ -110,7 +120,7 @@ async function handlePair(
 export async function startWorker(): Promise<void> {
   const config = resolveConfig();
 
-  const workerKey = ensureWorkerKey();
+  const keyPair = ensureKeyPair();
 
   const detected = config.capabilities ?? (await detectCapabilities());
   const registered = await registerCapabilities(detected);
@@ -121,15 +131,18 @@ export async function startWorker(): Promise<void> {
   }
 
   const beacon = new WorkerBeacon(
-    workerKey,
+    keyPair.privateKeyPem,
+    keyPair.publicKeyPem,
+    keyPair.fingerprint,
     registered,
     config.maxConcurrency,
     config.labels,
-    (req) => handlePair(req, config, registered),
+    (serverUrl, companyId, workerName) =>
+      handlePair(serverUrl, config, registered, companyId, workerName),
   );
 
   const actualPort = await beacon.start(config.beaconPort);
-  banner(workerKey, actualPort, registered, config);
+  banner(keyPair.fingerprint, actualPort, registered, config);
 
   if (config.server && config.token) {
     console.log("[worker] Server and token configured — starting outbound connection");

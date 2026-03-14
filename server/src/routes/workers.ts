@@ -1,4 +1,4 @@
-import { randomBytes, createHash } from "node:crypto";
+import { randomBytes, createHash, verify as cryptoVerify } from "node:crypto";
 import { Router } from "express";
 import { eq, and } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
@@ -19,6 +19,20 @@ function generateWorkerToken(): string {
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+function verifyEd25519(publicKeyPem: string, challenge: string, signatureBase64: string): boolean {
+  try {
+    return cryptoVerify(null, Buffer.from(challenge), publicKeyPem, Buffer.from(signatureBase64, "base64"));
+  } catch {
+    return false;
+  }
+}
+
+function computeFingerprint(publicKeyPem: string): string {
+  const { createPublicKey } = require("node:crypto") as typeof import("node:crypto");
+  const der = createPublicKey(publicKeyPem).export({ type: "spki", format: "der" });
+  return `SHA256:${createHash("sha256").update(der).digest("base64")}`;
 }
 
 function toWorkerResponse(
@@ -231,8 +245,15 @@ export function workerRoutes(db: Db, registry: WorkerRegistry) {
   });
 
   // ---------------------------------------------------------------------------
-  // Pair with a discovered worker: send the worker's key to it, get it to
-  // connect back to us, and persist it in the database.
+  // Pair with a discovered worker using Ed25519 challenge-response.
+  //
+  // Flow:
+  //   1. Server sends random challenge to worker's /challenge endpoint
+  //   2. Worker signs challenge with its Ed25519 private key, returns signature + public key
+  //   3. Server verifies signature matches the public key
+  //   4. User confirms the fingerprint matches what's shown on the worker terminal
+  //   5. Server tells worker to connect via /pair endpoint
+  //   6. Worker calls /pair-accept to register and get a WebSocket token
   // ---------------------------------------------------------------------------
 
   router.post("/companies/:companyId/workers/pair", async (req, res) => {
@@ -240,41 +261,82 @@ export function workerRoutes(db: Db, registry: WorkerRegistry) {
     assertBoard(req);
     assertCompanyAccess(req, companyId);
 
-    const { host, port = 19820, key, name } = req.body as {
+    const { host, port = 19820, fingerprint, name } = req.body as {
       host: string;
       port?: number;
-      key: string;
+      fingerprint: string;
       name?: string;
     };
 
-    if (!host || !key) {
-      res.status(400).json({ error: "host and key are required" });
+    if (!host || !fingerprint) {
+      res.status(400).json({ error: "host and fingerprint are required" });
       return;
     }
 
     const serverUrl = process.env.PAPERCLIP_API_URL ?? `http://localhost:${process.env.PAPERCLIP_LISTEN_PORT ?? "3100"}`;
+    const challenge = randomBytes(32).toString("hex");
 
     try {
-      const pairRes = await fetch(`http://${host}:${port}/pair`, {
+      // Step 1: Send challenge to worker
+      const challengeRes = await fetch(`http://${host}:${port}/challenge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          serverUrl,
-          key,
-          companyId,
-          workerName: name,
-        }),
+        body: JSON.stringify({ challenge }),
       });
 
-      const pairBody = (await pairRes.json()) as { ok: boolean; error?: string };
-      if (!pairBody.ok) {
-        res.status(400).json({
-          error: pairBody.error ?? "worker rejected pairing",
+      if (!challengeRes.ok) {
+        res.status(502).json({ error: "worker did not respond to challenge" });
+        return;
+      }
+
+      const challengeBody = (await challengeRes.json()) as {
+        ok: boolean;
+        signature?: string;
+        publicKey?: string;
+        error?: string;
+      };
+
+      if (!challengeBody.ok || !challengeBody.signature || !challengeBody.publicKey) {
+        res.status(400).json({ error: challengeBody.error ?? "invalid challenge response" });
+        return;
+      }
+
+      // Step 2: Verify the signature
+      const signatureValid = verifyEd25519(challengeBody.publicKey, challenge, challengeBody.signature);
+      if (!signatureValid) {
+        res.status(403).json({ error: "signature verification failed — worker identity could not be confirmed" });
+        return;
+      }
+
+      // Step 3: Verify the fingerprint matches what the user provided
+      const actualFingerprint = computeFingerprint(challengeBody.publicKey);
+      if (actualFingerprint !== fingerprint) {
+        res.status(403).json({
+          error: "fingerprint mismatch — the worker's key does not match the fingerprint you provided",
+          expected: fingerprint,
+          actual: actualFingerprint,
         });
         return;
       }
 
-      res.json({ ok: true, message: "Worker paired and will connect shortly" });
+      // Step 4: Tell worker to connect
+      const pairRes = await fetch(`http://${host}:${port}/pair`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverUrl, companyId, workerName: name }),
+      });
+
+      const pairBody = (await pairRes.json()) as { ok: boolean; error?: string };
+      if (!pairBody.ok) {
+        res.status(400).json({ error: pairBody.error ?? "worker rejected pairing" });
+        return;
+      }
+
+      res.json({
+        ok: true,
+        fingerprint: actualFingerprint,
+        message: "Worker identity verified and paired — connecting shortly",
+      });
     } catch (err) {
       res.status(502).json({
         error: `Could not reach worker at ${host}:${port}: ${err instanceof Error ? err.message : String(err)}`,
@@ -295,7 +357,8 @@ export function workerRoutes(db: Db, registry: WorkerRegistry) {
       capabilities,
       maxConcurrency,
       labels,
-      workerKey,
+      publicKey,
+      fingerprint: workerFingerprint,
       companyId,
       workerName,
     } = req.body as {
@@ -306,13 +369,14 @@ export function workerRoutes(db: Db, registry: WorkerRegistry) {
       capabilities: string[];
       maxConcurrency: number;
       labels: Record<string, unknown>;
-      workerKey: string;
+      publicKey: string;
+      fingerprint: string;
       companyId?: string;
       workerName?: string;
     };
 
-    if (!workerKey) {
-      res.status(400).json({ error: "workerKey is required" });
+    if (!publicKey) {
+      res.status(400).json({ error: "publicKey is required" });
       return;
     }
 
@@ -347,7 +411,7 @@ export function workerRoutes(db: Db, registry: WorkerRegistry) {
       action: "worker.paired",
       entityType: "worker",
       entityId: row.id,
-      details: { hostname, platform, capabilities },
+      details: { hostname, platform, capabilities, fingerprint: workerFingerprint },
     });
 
     res.status(201).json({ token, workerId: row.id });

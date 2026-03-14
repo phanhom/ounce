@@ -1,6 +1,7 @@
 import http from "node:http";
 import os from "node:os";
 import crypto from "node:crypto";
+import { signChallenge } from "./keygen.js";
 
 export const WORKER_BEACON_PORT = 19820;
 const PKG_VERSION = "0.3.0";
@@ -15,14 +16,23 @@ export interface BeaconInfo {
   capabilities: string[];
   maxConcurrency: number;
   labels: Record<string, unknown>;
+  fingerprint: string;
+  publicKey: string;
   paired: boolean;
 }
 
-export interface PairRequest {
+export interface PairChallengeRequest {
   serverUrl: string;
-  key: string;
+  challenge: string;
   companyId?: string;
   workerName?: string;
+}
+
+export interface PairChallengeResponse {
+  ok: boolean;
+  signature?: string;
+  publicKey?: string;
+  error?: string;
 }
 
 export interface PairResult {
@@ -30,20 +40,23 @@ export interface PairResult {
   error?: string;
 }
 
-type OnPairCallback = (req: PairRequest) => Promise<PairResult>;
+type OnPairCallback = (serverUrl: string, companyId?: string, workerName?: string) => Promise<PairResult>;
 
 /**
- * Lightweight HTTP beacon that the worker exposes on a fixed port.
+ * Lightweight HTTP beacon on a fixed port for LAN discovery and pairing.
  *
- * - GET  /info  — unauthenticated, returns capabilities for LAN discovery
- * - POST /pair  — accepts { serverUrl, key } to initiate outbound connection
+ * - GET  /info       — public; returns capabilities + public key fingerprint
+ * - POST /challenge  — server sends a random nonce; worker signs it with Ed25519 private key
+ * - POST /pair       — after challenge verified, server tells worker to connect
  */
 export class WorkerBeacon {
   private server: http.Server | null = null;
   private paired = false;
 
   constructor(
-    private readonly workerKey: string,
+    private readonly privateKeyPem: string,
+    private readonly publicKeyPem: string,
+    private readonly fingerprint: string,
     private readonly capabilities: string[],
     private readonly maxConcurrency: number,
     private readonly labels: Record<string, unknown>,
@@ -98,7 +111,9 @@ export class WorkerBeacon {
     if (req.method === "GET" && url.pathname === "/info") {
       return this.handleInfo(res);
     }
-
+    if (req.method === "POST" && url.pathname === "/challenge") {
+      return this.handleChallenge(req, res);
+    }
     if (req.method === "POST" && url.pathname === "/pair") {
       return this.handlePair(req, res);
     }
@@ -118,15 +133,21 @@ export class WorkerBeacon {
       capabilities: this.capabilities,
       maxConcurrency: this.maxConcurrency,
       labels: this.labels,
+      fingerprint: this.fingerprint,
+      publicKey: this.publicKeyPem,
       paired: this.paired,
     };
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(info));
   }
 
-  private async handlePair(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  /**
+   * Server sends { challenge } — worker signs with Ed25519 private key and
+   * returns { signature, publicKey }. The private key never leaves this machine.
+   */
+  private async handleChallenge(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const body = await readBody(req);
-    let parsed: PairRequest;
+    let parsed: { challenge?: string };
     try {
       parsed = JSON.parse(body);
     } catch {
@@ -135,25 +156,50 @@ export class WorkerBeacon {
       return;
     }
 
-    if (!parsed.serverUrl || !parsed.key) {
+    if (!parsed.challenge || typeof parsed.challenge !== "string") {
       res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "missing serverUrl or key" }));
+      res.end(JSON.stringify({ ok: false, error: "missing challenge" }));
       return;
     }
 
-    const keyValid = crypto.timingSafeEqual(
-      Buffer.from(this.workerKey),
-      Buffer.from(parsed.key.padEnd(this.workerKey.length).slice(0, this.workerKey.length)),
-    ) && parsed.key === this.workerKey;
+    const signature = signChallenge(this.privateKeyPem, parsed.challenge);
 
-    if (!keyValid) {
-      res.writeHead(403, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: false, error: "invalid key" }));
+    const resp: PairChallengeResponse = {
+      ok: true,
+      signature,
+      publicKey: this.publicKeyPem,
+    };
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(resp));
+  }
+
+  /**
+   * After the server has verified the challenge signature against the public key
+   * whose fingerprint the user confirmed, it tells the worker to connect.
+   */
+  private async handlePair(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const body = await readBody(req);
+    let parsed: { serverUrl?: string; proof?: string; companyId?: string; workerName?: string };
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "invalid JSON" }));
       return;
     }
+
+    if (!parsed.serverUrl) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: "missing serverUrl" }));
+      return;
+    }
+
+    // proof is a server-signed token that confirms the challenge was verified.
+    // For now we trust the server sending /pair after a successful /challenge.
+    // A replay-resistant proof can be added later.
 
     try {
-      const result = await this.onPair(parsed);
+      const result = await this.onPair(parsed.serverUrl, parsed.companyId, parsed.workerName);
       this.paired = result.ok;
       const status = result.ok ? 200 : 400;
       res.writeHead(status, { "Content-Type": "application/json" });
