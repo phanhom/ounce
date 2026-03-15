@@ -78,6 +78,7 @@ export const queryKeys = {
   runIssues: (runId: string) => ["run-issues", runId] as const,
   org: (companyId: string) => ["org", companyId] as const,
   integrations: (companyId: string) => ["integrations", companyId] as const,
+  workers: (companyId: string) => ["workers", companyId] as const,
   plugins: {
     all: ["plugins"] as const,
     examples: ["plugins", "examples"] as const,

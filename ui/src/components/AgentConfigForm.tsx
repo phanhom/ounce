@@ -23,7 +23,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { FolderOpen, Heart, ChevronDown, X } from "lucide-react";
+import { FolderOpen, Heart, ChevronDown, X, Server } from "lucide-react";
+import { workersApi, type WorkerInfo } from "../api/workers";
 import { cn } from "../lib/utils";
 import { extractModelName, extractProviderId } from "../lib/model-utils";
 import { queryKeys } from "../lib/queryKeys";
@@ -287,6 +288,13 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
     adapterType === "opencode_local" ||
     adapterType === "cursor";
   const uiAdapter = useMemo(() => getUIAdapter(adapterType), [adapterType]);
+
+  const { data: workersData } = useQuery({
+    queryKey: selectedCompanyId ? queryKeys.workers(selectedCompanyId) : ["workers", "none"],
+    queryFn: () => workersApi.list(selectedCompanyId!),
+    enabled: Boolean(selectedCompanyId) && isLocal,
+  });
+  const availableWorkers: WorkerInfo[] = workersData?.workers ?? [];
 
   // Fetch adapter models for the effective adapter type
   const {
@@ -576,6 +584,36 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                 />
                 <ChoosePathButton />
               </div>
+            </Field>
+          )}
+
+          {/* Remote worker (optional) */}
+          {isLocal && availableWorkers.length > 0 && (
+            <Field label="Remote worker" hint="Run this agent on a remote machine instead of locally. Leave empty to run on this server.">
+              <select
+                value={
+                  isCreate
+                    ? (val!.worker ?? "")
+                    : eff("adapterConfig", "worker", String(config.worker ?? ""))
+                }
+                onChange={(e) => {
+                  const v = e.target.value || undefined;
+                  if (isCreate) {
+                    set!({ worker: v });
+                  } else {
+                    mark("adapterConfig", "worker", v);
+                  }
+                }}
+                className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm"
+              >
+                <option value="">Local (this server)</option>
+                {availableWorkers.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name} — {w.status === "online" ? "🟢" : "⚫"} {w.capabilities.filter((c) => !["openclaw_gateway","process","http"].includes(c)).join(", ")}
+                    {w.status === "online" ? ` (${w.activeRuns}/${w.maxConcurrency})` : " (offline)"}
+                  </option>
+                ))}
+              </select>
             </Field>
           )}
 

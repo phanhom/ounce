@@ -135,7 +135,11 @@ export function NewAgent() {
 
   function buildAdapterConfig() {
     const adapter = getUIAdapter(configValues.adapterType);
-    return adapter.buildAdapterConfig(configValues);
+    const ac = adapter.buildAdapterConfig(configValues);
+    if (configValues.worker) {
+      ac.worker = { workerId: configValues.worker };
+    }
+    return ac;
   }
 
   function handleSubmit() {

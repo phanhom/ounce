@@ -23,6 +23,7 @@ import { Activity } from "./pages/Activity";
 import { Inbox } from "./pages/Inbox";
 import { CompanySettings } from "./pages/CompanySettings";
 import { Integrations } from "./pages/Integrations";
+import { Workers } from "./pages/Workers";
 import { DesignGuide } from "./pages/DesignGuide";
 import { InstanceSettings } from "./pages/InstanceSettings";
 import { PluginManager } from "./pages/PluginManager";
@@ -116,6 +117,7 @@ function boardRoutes() {
       <Route path="companies" element={<Companies />} />
       <Route path="company/settings" element={<CompanySettings />} />
       <Route path="company/integrations" element={<Integrations />} />
+      <Route path="company/workers" element={<Workers />} />
       <Route path="settings" element={<LegacySettingsRedirect />} />
       <Route path="settings/*" element={<LegacySettingsRedirect />} />
       <Route path="plugins/:pluginId" element={<PluginPage />} />
