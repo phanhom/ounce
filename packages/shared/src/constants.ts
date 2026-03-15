@@ -24,6 +24,18 @@ export type AgentStatus = (typeof AGENT_STATUSES)[number];
 export const WORKER_STATUSES = ["online", "offline"] as const;
 export type WorkerStatus = (typeof WORKER_STATUSES)[number];
 
+export const INTEGRATION_PROVIDERS = ["mysql", "minio", "gitlab"] as const;
+export type IntegrationProvider = (typeof INTEGRATION_PROVIDERS)[number];
+
+export const INTEGRATION_STATUSES = ["active", "inactive", "error"] as const;
+export type IntegrationStatus = (typeof INTEGRATION_STATUSES)[number];
+
+export const INTEGRATION_PROVIDER_LABELS: Record<IntegrationProvider, string> = {
+  mysql: "MySQL",
+  minio: "MinIO",
+  gitlab: "GitLab",
+};
+
 export const AGENT_ADAPTER_TYPES = [
   "process",
   "http",

@@ -341,7 +341,10 @@ export function OnboardingWizard() {
     }
   }
 
-  async function handleStep1Next() {
+  async function createCompanyIfNeeded(): Promise<{ id: string; prefix: string } | null> {
+    if (createdCompanyId && createdCompanyPrefix) {
+      return { id: createdCompanyId, prefix: createdCompanyPrefix };
+    }
     setLoading(true);
     setError(null);
     try {
@@ -366,12 +369,27 @@ export function OnboardingWizard() {
         });
       }
 
-      setStep(2);
+      return { id: company.id, prefix: company.issuePrefix };
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create company");
+      return null;
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleStep1Next() {
+    const result = await createCompanyIfNeeded();
+    if (result) setStep(2);
+  }
+
+  async function handleSkipToDashboard() {
+    const result = await createCompanyIfNeeded();
+    if (!result) return;
+    setSelectedCompanyId(result.id);
+    reset();
+    closeOnboarding();
+    navigate(`/${result.prefix}/dashboard`);
   }
 
   async function handleStep2Next() {
@@ -1245,18 +1263,28 @@ export function OnboardingWizard() {
                 </div>
                 <div className="flex items-center gap-2">
                   {step === 1 && (
-                    <Button
-                      size="sm"
-                      disabled={!companyName.trim() || loading}
-                      onClick={handleStep1Next}
-                    >
-                      {loading ? (
-                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                      ) : (
-                        <ArrowRight className="h-3.5 w-3.5 mr-1" />
-                      )}
-                      {loading ? "Creating..." : "Next"}
-                    </Button>
+                    <>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!companyName.trim() || loading}
+                        onClick={handleSkipToDashboard}
+                      >
+                        {loading ? "Creating..." : "Skip — go to Dashboard"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={!companyName.trim() || loading}
+                        onClick={handleStep1Next}
+                      >
+                        {loading ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        ) : (
+                          <ArrowRight className="h-3.5 w-3.5 mr-1" />
+                        )}
+                        {loading ? "Creating..." : "Next: Add Agent"}
+                      </Button>
+                    </>
                   )}
                   {step === 2 && (
                     <Button

@@ -25,6 +25,7 @@ import { llmRoutes } from "./routes/llms.js";
 import { assetRoutes } from "./routes/assets.js";
 import { accessRoutes } from "./routes/access.js";
 import { workerRoutes } from "./routes/workers.js";
+import { integrationRoutes } from "./routes/integrations.js";
 import { applyUiBranding } from "./ui-branding.js";
 import type { BetterAuthSessionResult } from "./auth/better-auth.js";
 import type { WorkerRegistry } from "./services/worker-registry.js";
@@ -125,6 +126,7 @@ export async function createApp(
       allowedHostnames: opts.allowedHostnames,
     }),
   );
+  api.use(integrationRoutes(db));
   if (opts.workerRegistry) {
     api.use(workerRoutes(db, opts.workerRegistry));
   }

@@ -2,6 +2,7 @@ import http from "node:http";
 import os from "node:os";
 import crypto from "node:crypto";
 import { signChallenge } from "./keygen.js";
+import { log } from "./logger.js";
 
 export const WORKER_BEACON_PORT = 19820;
 const PKG_VERSION = "0.3.0";
@@ -71,7 +72,7 @@ export class WorkerBeacon {
 
       this.server.on("error", (err: NodeJS.ErrnoException) => {
         if (err.code === "EADDRINUSE") {
-          console.warn(`[beacon] Port ${port} in use, trying ${port + 1}`);
+          log.beacon("warn", `Port ${port} in use, trying ${port + 1}`);
           this.server!.listen(port + 1, "0.0.0.0");
           return;
         }
@@ -108,13 +109,18 @@ export class WorkerBeacon {
 
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 
+    const clientIp = req.socket.remoteAddress ?? "unknown";
+
     if (req.method === "GET" && url.pathname === "/info") {
+      log.beacon("debug", `GET /info from ${clientIp}`);
       return this.handleInfo(res);
     }
     if (req.method === "POST" && url.pathname === "/challenge") {
+      log.beacon("info", `POST /challenge from ${clientIp}`, "signing nonce with private key");
       return this.handleChallenge(req, res);
     }
     if (req.method === "POST" && url.pathname === "/pair") {
+      log.beacon("info", `POST /pair from ${clientIp}`, "pairing request received");
       return this.handlePair(req, res);
     }
 
@@ -202,14 +208,18 @@ export class WorkerBeacon {
       const result = await this.onPair(parsed.serverUrl, parsed.companyId, parsed.workerName);
       this.paired = result.ok;
       const status = result.ok ? 200 : 400;
+      if (result.ok) {
+        log.pair("info", `Pairing succeeded with ${parsed.serverUrl}`);
+      } else {
+        log.pair("warn", `Pairing failed: ${result.error ?? "unknown"}`);
+      }
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(result));
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : "pairing failed";
+      log.pair("error", `Pairing error: ${errMsg}`);
       res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        ok: false,
-        error: err instanceof Error ? err.message : "pairing failed",
-      }));
+      res.end(JSON.stringify({ ok: false, error: errMsg }));
     }
   }
 }

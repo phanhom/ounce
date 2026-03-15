@@ -33,3 +33,4 @@ export { activityLog } from "./activity_log.js";
 export { companySecrets } from "./company_secrets.js";
 export { companySecretVersions } from "./company_secret_versions.js";
 export { workers } from "./workers.js";
+export { companyIntegrations } from "./company_integrations.js";

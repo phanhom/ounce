@@ -5,43 +5,63 @@ import { registerCapabilities } from "./executor.js";
 import { WorkerConnection } from "./connection.js";
 import { WorkerBeacon, type PairResult } from "./beacon.js";
 import { ensureKeyPair, getPublicKeyPath, getPrivateKeyPath } from "./keygen.js";
+import { log, setLogLevel } from "./logger.js";
 
 let activeConnection: WorkerConnection | null = null;
 
+const C = {
+  reset: "\x1b[0m",
+  dim: "\x1b[2m",
+  cyan: "\x1b[36m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  bold: "\x1b[1m",
+  magenta: "\x1b[35m",
+};
+
 function banner(fingerprint: string, port: number, capabilities: string[], config: WorkerConfig): void {
   const ips = getLocalIPs();
-  const w = 61;
-  const line = (label: string, value: string) =>
-    `│  ${label.padEnd(13)} │ ${value}`.padEnd(w) + "│";
 
   console.log("");
-  console.log("┌" + "─".repeat(w - 2) + "┐");
-  console.log("│" + "Paperclip Remote Worker".padStart(Math.floor((w - 2 + 23) / 2)).padEnd(w - 2) + "│");
-  console.log("├" + "─".repeat(w - 2) + "┤");
-  console.log(line("Platform", `${os.platform()} ${os.arch()} (Node ${process.version})`));
-  console.log(line("Hostname", os.hostname()));
-  console.log(line("Capabilities", capabilities.join(", ") || "(none)"));
-  console.log(line("Concurrency", String(config.maxConcurrency)));
-  console.log(line("Beacon Port", String(port)));
+  console.log(`${C.cyan}┌─────────────────────────────────────────────────────────────┐${C.reset}`);
+  console.log(`${C.cyan}│${C.reset}${C.bold}           Paperclip Remote Worker${C.reset}${C.cyan}                           │${C.reset}`);
+  console.log(`${C.cyan}├─────────────────────────────────────────────────────────────┤${C.reset}`);
+
+  const row = (label: string, value: string, color = "") => {
+    const pad = 59 - label.length - value.length - 6;
+    console.log(`${C.cyan}│${C.reset}  ${C.dim}${label}${C.reset} ${color}${value}${color ? C.reset : ""}${" ".repeat(Math.max(0, pad))}${C.cyan}│${C.reset}`);
+  };
+
+  row("Platform", `${os.platform()} ${os.arch()} (Node ${process.version})`);
+  row("Hostname", os.hostname());
+  row("Capabilities", capabilities.join(", ") || "(none)", C.green);
+  row("Concurrency", String(config.maxConcurrency));
+  row("Log Level", config.logLevel);
+  row("Beacon Port", String(port));
   for (const ip of ips) {
-    console.log(line("LAN Address", `${ip}:${port}`));
+    row("LAN Address", `${ip}:${port}`, C.cyan);
   }
-  console.log("├" + "─".repeat(w - 2) + "┤");
+
+  console.log(`${C.cyan}├─────────────────────────────────────────────────────────────┤${C.reset}`);
+
   if (config.server) {
-    console.log(line("Server", config.server));
-    console.log(line("Status", "outbound connection active"));
+    row("Server", config.server, C.green);
+    row("Status", "outbound connection active", C.green);
   } else {
-    console.log(line("Status", "awaiting pairing..."));
+    row("Status", "awaiting pairing...", C.yellow);
   }
-  console.log("├" + "─".repeat(w - 2) + "┤");
-  console.log(line("Fingerprint", fingerprint));
-  console.log("│".padEnd(w) + "│");
-  console.log(`│  Use this fingerprint to verify the worker identity`.padEnd(w) + "│");
-  console.log(`│  when pairing from the Paperclip UI.`.padEnd(w) + "│");
-  console.log("│".padEnd(w) + "│");
-  console.log(`│  Private key: ${getPrivateKeyPath()}`.padEnd(w) + "│");
-  console.log(`│  Public key:  ${getPublicKeyPath()}`.padEnd(w) + "│");
-  console.log("└" + "─".repeat(w - 2) + "┘");
+
+  console.log(`${C.cyan}├─────────────────────────────────────────────────────────────┤${C.reset}`);
+  row("Fingerprint", fingerprint, C.magenta);
+  console.log(`${C.cyan}│${C.reset}                                                            ${C.cyan}│${C.reset}`);
+  console.log(`${C.cyan}│${C.reset}  ${C.dim}Use this fingerprint to verify the worker identity${C.reset}        ${C.cyan}│${C.reset}`);
+  console.log(`${C.cyan}│${C.reset}  ${C.dim}when pairing from the Paperclip UI.${C.reset}                       ${C.cyan}│${C.reset}`);
+  console.log(`${C.cyan}│${C.reset}                                                            ${C.cyan}│${C.reset}`);
+  console.log(`${C.cyan}│${C.reset}  ${C.dim}Private key:${C.reset} ${getPrivateKeyPath()}`.padEnd(72) + `${C.cyan}│${C.reset}`);
+  console.log(`${C.cyan}│${C.reset}  ${C.dim}Public key:${C.reset}  ${getPublicKeyPath()}`.padEnd(72) + `${C.cyan}│${C.reset}`);
+  console.log(`${C.cyan}└─────────────────────────────────────────────────────────────┘${C.reset}`);
+  console.log("");
+  console.log(`${C.dim}  Tip: Use --verbose or -v for debug-level logging (frame tracing)${C.reset}`);
   console.log("");
 }
 
@@ -67,6 +87,7 @@ async function handlePair(
   workerName?: string,
 ): Promise<PairResult> {
   if (activeConnection) {
+    log.pair("info", "Stopping existing connection for re-pairing");
     activeConnection.stop();
     activeConnection = null;
   }
@@ -75,6 +96,8 @@ async function handlePair(
   const url = serverUrl.replace(/\/+$/, "");
   const registerUrl = `${url}/api/workers/pair-accept`;
   const keyPair = ensureKeyPair();
+
+  log.pair("info", `Registering with server at ${registerUrl}`);
 
   try {
     const response = await fetch(registerUrl, {
@@ -97,28 +120,30 @@ async function handlePair(
 
     if (!response.ok) {
       const text = await response.text();
+      log.pair("error", `Server rejected registration: ${response.status}`, text);
       return { ok: false, error: `server rejected registration: ${response.status} ${text}` };
     }
 
     const data = (await response.json()) as { token: string; workerId: string };
     config.token = data.token;
 
-    console.log(`[worker] Paired with server, assigned ID: ${data.workerId}`);
+    log.pair("info", `Paired successfully — worker ID: ${data.workerId}`);
+    log.pair("info", "Starting WebSocket connection to server...");
 
     activeConnection = new WorkerConnection(config, capabilities);
     void activeConnection.start();
 
     return { ok: true };
   } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : "registration failed",
-    };
+    const errMsg = err instanceof Error ? err.message : "registration failed";
+    log.pair("error", `Registration failed: ${errMsg}`);
+    return { ok: false, error: errMsg };
   }
 }
 
 export async function startWorker(): Promise<void> {
   const config = resolveConfig();
+  setLogLevel(config.logLevel);
 
   const keyPair = ensureKeyPair();
 
@@ -126,7 +151,7 @@ export async function startWorker(): Promise<void> {
   const registered = await registerCapabilities(detected);
 
   if (registered.length === 0) {
-    console.error("[worker] No adapters available. Install at least one CLI tool (claude, codex, cursor, etc.).");
+    log.error("system", "No adapters available. Install at least one CLI tool (claude, codex, cursor, etc.).");
     process.exit(1);
   }
 
@@ -145,24 +170,24 @@ export async function startWorker(): Promise<void> {
   banner(keyPair.fingerprint, actualPort, registered, config);
 
   if (config.server && config.token) {
-    console.log("[worker] Server and token configured — starting outbound connection");
+    log.info("system", "Server and token configured — starting outbound connection");
     activeConnection = new WorkerConnection(config, registered);
     void activeConnection.start();
   } else if (config.server && !config.token) {
-    console.log("[worker] Server URL set but no token — waiting for pairing via beacon");
+    log.info("system", "Server URL set but no token — waiting for pairing via beacon");
   } else {
-    console.log("[worker] No server configured — running in discovery mode, waiting for pairing");
+    log.info("system", "No server configured — running in discovery mode, waiting for pairing");
   }
 
   process.on("SIGINT", () => {
-    console.log("\n[worker] Shutting down (SIGINT)...");
+    log.info("system", "Shutting down (SIGINT)...");
     beacon.stop();
     activeConnection?.stop();
     process.exit(0);
   });
 
   process.on("SIGTERM", () => {
-    console.log("[worker] Shutting down (SIGTERM)...");
+    log.info("system", "Shutting down (SIGTERM)...");
     beacon.stop();
     activeConnection?.stop();
     process.exit(0);
@@ -170,6 +195,6 @@ export async function startWorker(): Promise<void> {
 }
 
 startWorker().catch((err) => {
-  console.error("[worker] Fatal error:", err);
+  log.error("system", `Fatal error: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

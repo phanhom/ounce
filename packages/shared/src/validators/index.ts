@@ -144,3 +144,12 @@ export {
   type CreateWorker,
   type UpdateWorker,
 } from "./worker.js";
+
+export {
+  upsertIntegrationSchema,
+  integrationConfigSchemas,
+  mysqlConfigSchema,
+  minioConfigSchema,
+  gitlabConfigSchema,
+  type UpsertIntegration,
+} from "./integration.js";

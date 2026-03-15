@@ -1,4 +1,5 @@
 import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
+import { log } from "./logger.js";
 
 type ExecuteFn = (ctx: AdapterExecutionContext) => Promise<AdapterExecutionResult>;
 
@@ -34,8 +35,9 @@ export async function registerCapabilities(capabilities: string[]): Promise<stri
       const mod = await loader();
       EXECUTORS[type] = mod.execute;
       registered.push(type);
-    } catch {
-      // Adapter package not available — skip silently
+      log.info("exec", `Loaded adapter: ${type}`);
+    } catch (err) {
+      log.debug("exec", `Adapter not available: ${type}`, err instanceof Error ? err.message : "");
     }
   }
 
@@ -48,6 +50,7 @@ export async function executeOnWorker(
 ): Promise<AdapterExecutionResult> {
   const executor = EXECUTORS[adapterType];
   if (!executor) {
+    log.exec("error", `No executor for adapter type: ${adapterType}`);
     return {
       exitCode: null,
       signal: null,

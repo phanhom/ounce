@@ -63,6 +63,13 @@ export type {
 } from "./access.js";
 export type { Worker, WorkerCreated } from "./worker.js";
 export type {
+  CompanyIntegration,
+  MysqlConfig,
+  MinioConfig,
+  GitlabConfig,
+  IntegrationConfig,
+} from "./integration.js";
+export type {
   CompanyPortabilityInclude,
   CompanyPortabilitySecretRequirement,
   CompanyPortabilityCompanyManifestEntry,

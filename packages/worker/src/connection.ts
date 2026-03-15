@@ -3,15 +3,12 @@ import WebSocket from "ws";
 import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
 import { executeOnWorker } from "./executor.js";
 import type { WorkerConfig } from "./config.js";
+import { log } from "./logger.js";
 
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 60_000;
 const PING_INTERVAL_MS = 30_000;
 const PKG_VERSION = "0.3.0";
-
-// ---------------------------------------------------------------------------
-// Frame types (mirrors server/src/services/worker-registry.ts)
-// ---------------------------------------------------------------------------
 
 interface ExecuteFrame {
   type: "execute";
@@ -38,10 +35,6 @@ interface ServerFrame {
   [key: string]: unknown;
 }
 
-// ---------------------------------------------------------------------------
-// WorkerConnection
-// ---------------------------------------------------------------------------
-
 export class WorkerConnection {
   private ws: WebSocket | null = null;
   private reconnectAttempt = 0;
@@ -50,6 +43,7 @@ export class WorkerConnection {
   private alive = false;
   private activeExecutions = new Map<string, AbortController>();
   private stopping = false;
+  private connectedAt: number | null = null;
 
   constructor(
     private readonly config: WorkerConfig,
@@ -69,6 +63,7 @@ export class WorkerConnection {
       this.ws.close(1000, "worker-shutdown");
       this.ws = null;
     }
+    log.ws("info", "Connection stopped");
   }
 
   private connect(): void {
@@ -79,10 +74,10 @@ export class WorkerConnection {
     const isLocalhost = /^wss?:\/\/(localhost|127\.0\.0\.1|::1)/.test(wsUrl);
 
     if (!isTls && !isLocalhost) {
-      console.warn("[worker] WARNING: Connecting over unencrypted ws:// to a non-localhost server. Use wss:// in production.");
+      log.ws("warn", "Connecting over unencrypted ws:// to a non-localhost server", "use wss:// in production");
     }
 
-    console.log(`[worker] Connecting to ${wsUrl}`);
+    log.ws("info", `Connecting to ${wsUrl}`);
 
     this.ws = new WebSocket(wsUrl, {
       headers: { Authorization: `Bearer ${this.config.token}` },
@@ -92,7 +87,8 @@ export class WorkerConnection {
     this.ws.on("open", () => {
       this.reconnectAttempt = 0;
       this.alive = true;
-      console.log("[worker] Connected to Paperclip server");
+      this.connectedAt = Date.now();
+      log.ws("info", "WebSocket open — awaiting welcome frame");
       this.startPingLoop();
     });
 
@@ -102,17 +98,20 @@ export class WorkerConnection {
 
     this.ws.on("close", (code, reason) => {
       const reasonText = typeof reason === "string" ? reason : reason?.toString("utf-8") ?? "";
-      console.log(`[worker] Connection closed (${code}): ${reasonText}`);
+      const uptime = this.connectedAt ? `uptime ${Math.round((Date.now() - this.connectedAt) / 1000)}s` : "";
+      log.ws("warn", `Connection closed (code=${code})`, `${reasonText} ${uptime}`.trim());
+      this.connectedAt = null;
       this.cleanup();
       this.scheduleReconnect();
     });
 
     this.ws.on("error", (err) => {
-      console.error(`[worker] WebSocket error: ${err.message}`);
+      log.ws("error", `WebSocket error: ${err.message}`);
     });
 
     this.ws.on("pong", () => {
       this.alive = true;
+      log.frame("<<", "pong");
     });
   }
 
@@ -131,7 +130,7 @@ export class WorkerConnection {
       RECONNECT_MAX_MS,
     );
     this.reconnectAttempt++;
-    console.log(`[worker] Reconnecting in ${Math.round(delay / 1000)}s (attempt ${this.reconnectAttempt})`);
+    log.ws("info", `Reconnecting in ${Math.round(delay / 1000)}s`, `attempt #${this.reconnectAttempt}`);
     this.reconnectTimer = setTimeout(() => this.connect(), delay);
   }
 
@@ -140,17 +139,20 @@ export class WorkerConnection {
     this.pingTimer = setInterval(() => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
       if (!this.alive) {
-        console.warn("[worker] Server not responding to pings; reconnecting");
+        log.ws("warn", "Server not responding to pings — reconnecting");
         this.ws.terminate();
         return;
       }
       this.alive = false;
       this.ws.ping();
+      log.frame(">>", "ping");
     }, PING_INTERVAL_MS);
   }
 
   private send(payload: unknown): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const p = payload as { type?: string };
+    if (p.type) log.frame(">>", p.type, p.type === "log" ? "(stream)" : undefined);
     this.ws.send(JSON.stringify(payload));
   }
 
@@ -160,16 +162,26 @@ export class WorkerConnection {
       const text = typeof raw === "string" ? raw : (raw as Buffer).toString("utf-8");
       frame = JSON.parse(text);
     } catch {
+      log.ws("error", "Failed to parse incoming frame");
       return;
     }
 
+    log.frame("<<", frame.type ?? "unknown");
+
     switch (frame.type) {
       case "welcome":
+        log.ws("info", "Received welcome — sending registration");
         this.sendRegister();
         break;
 
       case "registered":
-        console.log(`[worker] Registered with capabilities: ${this.capabilities.join(", ")}`);
+        log.ws("info", "Registered with server successfully", `capabilities: [${this.capabilities.join(", ")}]`);
+        log.separator();
+        log.status("Server", this.config.server, true);
+        log.status("Connection", "established", true);
+        log.status("Capabilities", this.capabilities.join(", "), true);
+        log.status("Active runs", `${this.activeExecutions.size}/${this.config.maxConcurrency}`, true);
+        log.separator();
         break;
 
       case "execute":
@@ -183,6 +195,12 @@ export class WorkerConnection {
       case "ping":
         this.send({ type: "pong" });
         break;
+
+      case "error": {
+        const errMsg = typeof frame.message === "string" ? frame.message : JSON.stringify(frame);
+        log.ws("error", `Server error: ${errMsg}`);
+        break;
+      }
     }
   }
 
@@ -204,7 +222,13 @@ export class WorkerConnection {
     const controller = new AbortController();
     this.activeExecutions.set(requestId, controller);
 
-    console.log(`[worker] Executing ${adapterType} for run ${rawCtx.runId}`);
+    const agentName = rawCtx.agent?.name ?? "unknown";
+    log.exec("info",
+      `Starting ${adapterType} execution`,
+      `agent="${agentName}" run=${rawCtx.runId} active=${this.activeExecutions.size}/${this.config.maxConcurrency}`,
+    );
+
+    const startTime = Date.now();
 
     const ctx: AdapterExecutionContext = {
       runId: rawCtx.runId,
@@ -217,6 +241,7 @@ export class WorkerConnection {
         this.send({ type: "log", requestId, stream, chunk });
       },
       onMeta: async (meta) => {
+        log.exec("debug", `Meta received for run ${rawCtx.runId}`, JSON.stringify(meta));
         this.send({ type: "meta", requestId, meta });
       },
     };
@@ -225,18 +250,34 @@ export class WorkerConnection {
     try {
       result = await executeOnWorker(adapterType, ctx);
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      log.exec("error", `Execution crashed: ${errMsg}`, `run=${rawCtx.runId}`);
       result = {
         exitCode: null,
         signal: null,
         timedOut: false,
-        errorMessage: err instanceof Error ? err.message : String(err),
+        errorMessage: errMsg,
         errorCode: "worker_execution_error",
       };
     }
 
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     this.activeExecutions.delete(requestId);
+
+    const ok = result.exitCode === 0 && !result.errorMessage;
+    if (ok) {
+      log.exec("info",
+        `Completed ${adapterType}`,
+        `agent="${agentName}" run=${rawCtx.runId} exit=0 ${elapsed}s`,
+      );
+    } else {
+      log.exec("warn",
+        `Finished ${adapterType} with issues`,
+        `agent="${agentName}" run=${rawCtx.runId} exit=${result.exitCode} signal=${result.signal} timedOut=${result.timedOut} ${elapsed}s${result.errorMessage ? " error=" + result.errorMessage : ""}`,
+      );
+    }
+
     this.send({ type: "result", requestId, result });
-    console.log(`[worker] Completed ${adapterType} for run ${rawCtx.runId} (exit=${result.exitCode})`);
   }
 
   private handleCancel(frame: CancelFrame): void {
@@ -244,7 +285,9 @@ export class WorkerConnection {
     if (controller) {
       controller.abort();
       this.activeExecutions.delete(frame.requestId);
-      console.log(`[worker] Cancelled execution ${frame.requestId}: ${frame.reason}`);
+      log.exec("warn", `Cancelled execution ${frame.requestId}`, frame.reason);
+    } else {
+      log.exec("debug", `Cancel for unknown request ${frame.requestId}`);
     }
   }
 

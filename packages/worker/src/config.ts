@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import type { LogLevel } from "./logger.js";
 
 export interface WorkerConfig {
   /** Paperclip server URL — empty when running in beacon-only (discovery) mode */
@@ -13,6 +14,8 @@ export interface WorkerConfig {
   env: Record<string, string>;
   /** Fixed port for the discovery beacon HTTP server */
   beaconPort: number;
+  /** Log level: debug, info, warn, error */
+  logLevel: LogLevel;
 }
 
 const CONFIG_FILE_CANDIDATES = [
@@ -28,11 +31,10 @@ function loadConfigFile(): Partial<WorkerConfig> {
       const raw = fs.readFileSync(resolved, "utf-8");
       const parsed = JSON.parse(raw);
       if (typeof parsed === "object" && parsed !== null) {
-        console.log(`[worker] Loaded config from ${resolved}`);
         return parsed as Partial<WorkerConfig>;
       }
     } catch {
-      console.warn(`[worker] Failed to parse config file ${resolved}`);
+      // skip corrupted config
     }
   }
   return {};
@@ -64,6 +66,16 @@ function parseCliArgs(argv: string[]): Partial<WorkerConfig> {
         break;
       case "--port":
         if (next) { result.beaconPort = parseInt(next, 10) || 19820; i++; }
+        break;
+      case "--verbose":
+      case "-v":
+        result.logLevel = "debug";
+        break;
+      case "--log-level":
+        if (next && ["debug", "info", "warn", "error"].includes(next)) {
+          result.logLevel = next as LogLevel;
+          i++;
+        }
         break;
       case "--config":
         if (next) {
@@ -106,6 +118,7 @@ export function resolveConfig(): WorkerConfig {
   const maxConcurrency = cli.maxConcurrency ?? file.maxConcurrency ?? 4;
   const env = file.env ?? {};
   const beaconPort = cli.beaconPort ?? file.beaconPort ?? 19820;
+  const logLevel = cli.logLevel ?? (process.env.PAPERCLIP_LOG_LEVEL as LogLevel) ?? file.logLevel ?? "info";
 
-  return { server, token, labels, capabilities, maxConcurrency, env, beaconPort };
+  return { server, token, labels, capabilities, maxConcurrency, env, beaconPort, logLevel };
 }

@@ -18,4 +18,5 @@ export const API = {
   members: `${API_PREFIX}/members`,
   admin: `${API_PREFIX}/admin`,
   workers: `${API_PREFIX}/workers`,
+  integrations: `${API_PREFIX}/integrations`,
 } as const;
