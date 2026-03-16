@@ -18,7 +18,13 @@ export default {
   target: "node18",
   format: "esm",
   outfile: "dist/paperclip-worker.mjs",
-  banner: { js: "#!/usr/bin/env node" },
+  banner: {
+    js: [
+      "#!/usr/bin/env node",
+      "import { createRequire as __$$createRequire } from 'node:module';",
+      "const require = __$$createRequire(import.meta.url);",
+    ].join("\n"),
+  },
   treeShaking: true,
   sourcemap: true,
   // Keep only true Node built-ins external — everything else gets inlined
