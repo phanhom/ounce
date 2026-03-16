@@ -11,6 +11,14 @@ const CONCURRENCY_SMALL = 128;
 const CONCURRENCY_LARGE = 256;
 const CLAMP_PREFIX = 16;              // anything broader than /16 gets clamped to /16
 
+export interface DiscoveredAdapterInfo {
+  type: string;
+  label: string;
+  version: string;
+  auth: string;
+  pairCode?: string;
+}
+
 export interface DiscoveredWorker {
   host: string;
   port: number;
@@ -25,6 +33,7 @@ export interface DiscoveredWorker {
   publicKey: string;
   paired: boolean;
   version: string;
+  adapters: DiscoveredAdapterInfo[];
 }
 
 interface Subnet {
@@ -127,6 +136,15 @@ async function fetchBeaconInfo(ip: string, port: number, timeoutMs: number): Pro
     const data = (await res.json()) as Record<string, unknown>;
     if (data.service !== "paperclip-worker") return null;
 
+    const rawAdapters = Array.isArray(data.adapters) ? (data.adapters as Record<string, unknown>[]) : [];
+    const adapters: DiscoveredAdapterInfo[] = rawAdapters.map((a) => ({
+      type: String(a.type ?? ""),
+      label: String(a.label ?? ""),
+      version: String(a.version ?? ""),
+      auth: String(a.auth ?? ""),
+      pairCode: typeof a.pairCode === "string" ? a.pairCode : undefined,
+    }));
+
     return {
       host: ip,
       port,
@@ -144,6 +162,7 @@ async function fetchBeaconInfo(ip: string, port: number, timeoutMs: number): Pro
       publicKey: String(data.publicKey ?? ""),
       paired: Boolean(data.paired),
       version: String(data.version ?? ""),
+      adapters,
     };
   } catch {
     return null;

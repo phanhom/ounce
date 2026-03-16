@@ -1,4 +1,5 @@
-import { randomBytes, createHash, verify as cryptoVerify } from "node:crypto";
+import { randomBytes, createHash, createPublicKey, verify as cryptoVerify } from "node:crypto";
+import os from "node:os";
 import { Router } from "express";
 import { eq, and } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
@@ -30,9 +31,31 @@ function verifyEd25519(publicKeyPem: string, challenge: string, signatureBase64:
 }
 
 function computeFingerprint(publicKeyPem: string): string {
-  const { createPublicKey } = require("node:crypto") as typeof import("node:crypto");
   const der = createPublicKey(publicKeyPem).export({ type: "spki", format: "der" });
   return `SHA256:${createHash("sha256").update(der).digest("base64")}`;
+}
+
+function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 10_000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+function resolveServerUrl(reqHost: string | undefined): string {
+  if (process.env.PAPERCLIP_API_URL) return process.env.PAPERCLIP_API_URL;
+  const port = process.env.PAPERCLIP_LISTEN_PORT ?? "3100";
+  const host = reqHost?.split(":")[0];
+  if (host && host !== "localhost" && host !== "127.0.0.1" && host !== "0.0.0.0") {
+    return `http://${host}:${port}`;
+  }
+  const interfaces = os.networkInterfaces();
+  for (const iface of Object.values(interfaces)) {
+    if (!iface) continue;
+    for (const addr of iface) {
+      if (addr.family === "IPv4" && !addr.internal) return `http://${addr.address}:${port}`;
+    }
+  }
+  return `http://localhost:${port}`;
 }
 
 function toWorkerResponse(
@@ -273,16 +296,16 @@ export function workerRoutes(db: Db, registry: WorkerRegistry) {
       return;
     }
 
-    const serverUrl = process.env.PAPERCLIP_API_URL ?? `http://localhost:${process.env.PAPERCLIP_LISTEN_PORT ?? "3100"}`;
+    const serverUrl = resolveServerUrl(req.headers.host);
     const challenge = randomBytes(32).toString("hex");
+    const workerBase = `http://${host}:${port}`;
 
     try {
       // Step 1: Send challenge to worker
-      const challengeRes = await fetch(`http://${host}:${port}/challenge`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ challenge }),
-      });
+      const challengeRes = await fetchWithTimeout(
+        `${workerBase}/challenge`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ challenge }) },
+      );
 
       if (!challengeRes.ok) {
         res.status(502).json({ error: "worker did not respond to challenge" });
@@ -319,12 +342,11 @@ export function workerRoutes(db: Db, registry: WorkerRegistry) {
         return;
       }
 
-      // Step 4: Tell worker to connect
-      const pairRes = await fetch(`http://${host}:${port}/pair`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ serverUrl, companyId, workerName: name }),
-      });
+      // Step 4: Tell worker to connect back to this server
+      const pairRes = await fetchWithTimeout(
+        `${workerBase}/pair`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverUrl, companyId, workerName: name }) },
+      );
 
       const pairBody = (await pairRes.json()) as { ok: boolean; error?: string };
       if (!pairBody.ok) {
@@ -338,8 +360,132 @@ export function workerRoutes(db: Db, registry: WorkerRegistry) {
         message: "Worker identity verified and paired — connecting shortly",
       });
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const cause = err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : "";
       res.status(502).json({
-        error: `Could not reach worker at ${host}:${port}: ${err instanceof Error ? err.message : String(err)}`,
+        error: `Could not reach worker at ${host}:${port}: ${msg}${cause}`,
+      });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Pair by adapter code: user enters a PCLIP-XXXX code from the worker banner
+  // ---------------------------------------------------------------------------
+
+  router.post("/companies/:companyId/workers/pair-by-code", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertBoard(req);
+    assertCompanyAccess(req, companyId);
+
+    const { code } = req.body as { code: string };
+    if (!code || typeof code !== "string") {
+      res.status(400).json({ error: "code is required" });
+      return;
+    }
+
+    const trimmedCode = code.trim().toUpperCase();
+
+    // 1. Scan LAN for workers
+    const { discovered } = await discoverWorkers({ limit: 20 });
+
+    // 2. Find the worker whose adapter matches the code
+    let matchedWorker: (typeof discovered)[number] | null = null;
+    let matchedAdapter: { type: string; label: string; version: string } | null = null;
+
+    for (const w of discovered) {
+      for (const a of w.adapters) {
+        if (a.pairCode && a.pairCode.toUpperCase() === trimmedCode) {
+          matchedWorker = w;
+          matchedAdapter = { type: a.type, label: a.label, version: a.version };
+          break;
+        }
+      }
+      if (matchedWorker) break;
+    }
+
+    if (!matchedWorker || !matchedAdapter) {
+      res.status(404).json({ error: "No worker found with that pairing code. Make sure the worker is running on the same network." });
+      return;
+    }
+
+    const { host, port, fingerprint } = matchedWorker;
+    const serverUrl = resolveServerUrl(req.headers.host);
+    const challenge = randomBytes(32).toString("hex");
+    const workerBase = `http://${host}:${port}`;
+
+    try {
+      // 3. Challenge-response to verify worker identity
+      const challengeRes = await fetchWithTimeout(
+        `${workerBase}/challenge`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ challenge }) },
+      );
+
+      if (!challengeRes.ok) {
+        res.status(502).json({ error: "worker did not respond to challenge" });
+        return;
+      }
+
+      const challengeBody = (await challengeRes.json()) as {
+        ok: boolean; signature?: string; publicKey?: string; error?: string;
+      };
+
+      if (!challengeBody.ok || !challengeBody.signature || !challengeBody.publicKey) {
+        res.status(400).json({ error: challengeBody.error ?? "invalid challenge response" });
+        return;
+      }
+
+      const signatureValid = verifyEd25519(challengeBody.publicKey, challenge, challengeBody.signature);
+      if (!signatureValid) {
+        res.status(403).json({ error: "signature verification failed" });
+        return;
+      }
+
+      const actualFingerprint = computeFingerprint(challengeBody.publicKey);
+      if (actualFingerprint !== fingerprint) {
+        res.status(403).json({ error: "fingerprint mismatch" });
+        return;
+      }
+
+      // 4. Tell worker to connect
+      const pairRes = await fetchWithTimeout(
+        `${workerBase}/pair`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverUrl, companyId, workerName: matchedWorker.hostname }) },
+      );
+
+      const pairBody = (await pairRes.json()) as { ok: boolean; error?: string };
+      if (!pairBody.ok) {
+        res.status(400).json({ error: pairBody.error ?? "worker rejected pairing" });
+        return;
+      }
+
+      // 5. Wait briefly for the worker to call /pair-accept and register
+      await new Promise((r) => setTimeout(r, 2000));
+
+      // Find the worker that was just created by pair-accept
+      const rows = await db
+        .select()
+        .from(workers)
+        .where(eq(workers.companyId, companyId));
+
+      const paired = rows.find((r) => {
+        const live = registry.get(r.id);
+        return live && registry.isOnline(r.id);
+      });
+
+      const workerResponse = paired ? toWorkerResponse(paired, registry) : null;
+
+      res.json({
+        ok: true,
+        worker: workerResponse,
+        adapter: matchedAdapter,
+        hostname: matchedWorker.hostname,
+        fingerprint: actualFingerprint,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const cause = err instanceof Error && err.cause instanceof Error ? ` (${err.cause.message})` : "";
+      res.status(502).json({
+        error: `Could not reach worker at ${host}:${port}: ${msg}${cause}`,
       });
     }
   });

@@ -3,9 +3,18 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { signChallenge } from "./keygen.js";
 import { log } from "./logger.js";
+import type { AdapterStatus } from "./detect.js";
 
 export const WORKER_BEACON_PORT = 19820;
 const PKG_VERSION = "0.3.0";
+
+export interface BeaconAdapterInfo {
+  type: string;
+  label: string;
+  version: string;
+  auth: string;
+  pairCode?: string;
+}
 
 export interface BeaconInfo {
   service: "paperclip-worker";
@@ -20,6 +29,7 @@ export interface BeaconInfo {
   fingerprint: string;
   publicKey: string;
   paired: boolean;
+  adapters: BeaconAdapterInfo[];
 }
 
 export interface PairChallengeRequest {
@@ -62,6 +72,7 @@ export class WorkerBeacon {
     private readonly maxConcurrency: number,
     private readonly labels: Record<string, unknown>,
     private readonly onPair: OnPairCallback,
+    private readonly statuses: AdapterStatus[] = [],
   ) {}
 
   async start(port = WORKER_BEACON_PORT): Promise<number> {
@@ -129,6 +140,14 @@ export class WorkerBeacon {
   }
 
   private handleInfo(res: http.ServerResponse): void {
+    const adapters: BeaconAdapterInfo[] = this.statuses.map((s) => ({
+      type: s.adapterType,
+      label: s.label,
+      version: s.version,
+      auth: s.auth,
+      pairCode: s.auth === "ready" ? s.pairCode : undefined,
+    }));
+
     const info: BeaconInfo = {
       service: "paperclip-worker",
       version: PKG_VERSION,
@@ -142,6 +161,7 @@ export class WorkerBeacon {
       fingerprint: this.fingerprint,
       publicKey: this.publicKeyPem,
       paired: this.paired,
+      adapters,
     };
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(info));

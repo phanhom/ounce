@@ -17,6 +17,14 @@ export interface WorkerInfo {
   updatedAt: string;
 }
 
+export interface DiscoveredAdapterInfo {
+  type: string;
+  label: string;
+  version: string;
+  auth: string;
+  pairCode?: string;
+}
+
 export interface DiscoveredWorker {
   host: string;
   port: number;
@@ -28,6 +36,7 @@ export interface DiscoveredWorker {
   maxConcurrency: number;
   fingerprint: string;
   publicKey: string;
+  adapters?: DiscoveredAdapterInfo[];
 }
 
 export interface DiscoverResult {
@@ -44,6 +53,14 @@ export interface ProbeResult {
 export interface PairResult {
   worker: WorkerInfo;
   token: string;
+}
+
+export interface PairByCodeResult {
+  ok: boolean;
+  worker: WorkerInfo | null;
+  adapter: { type: string; label: string; version: string };
+  hostname: string;
+  fingerprint: string;
 }
 
 export const workersApi = {
@@ -64,4 +81,7 @@ export const workersApi = {
 
   pair: (companyId: string, body: { host: string; port?: number; fingerprint: string; name?: string }) =>
     api.post<PairResult>(`/companies/${companyId}/workers/pair`, body),
+
+  pairByCode: (companyId: string, body: { code: string }) =>
+    api.post<PairByCodeResult>(`/companies/${companyId}/workers/pair-by-code`, body),
 };

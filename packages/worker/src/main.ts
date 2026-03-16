@@ -93,10 +93,10 @@ function banner(
     blank();
     for (const s of ready) {
       const ver = s.version ? ` ${C.dim}(${s.version})${C.reset}` : "";
+      const code = s.pairCode ? `${C.magenta}${s.pairCode}${C.reset}` : "";
       const left = `  ${C.green}✓${C.reset} ${s.label}${ver}`;
-      const tag = `${C.green}ready${C.reset}`;
-      const gap = Math.max(1, W - vlen(left) - vlen(tag) - 2);
-      row(`${left}${" ".repeat(gap)}${tag}`);
+      const gap = Math.max(1, W - vlen(left) - vlen(code) - 2);
+      row(`${left}${" ".repeat(gap)}${code}`);
     }
   } else {
     row(`  ${C.dim}No ready adapters${C.reset}`);
@@ -145,6 +145,11 @@ function banner(
   kv("Fingerprint", fingerprint, C.magenta);
   kv("Private key", tilde(getPrivateKeyPath()));
   kv("Public key", tilde(getPublicKeyPath()));
+
+  if (ready.length > 0) {
+    console.log(hr("├", "┤"));
+    row(`  ${C.dim}Enter a code above in the Paperclip UI to add as an agent.${C.reset}`);
+  }
 
   console.log(hr("└", "┘"));
 
@@ -255,6 +260,7 @@ export async function startWorker(): Promise<void> {
     config.labels,
     (serverUrl, companyId, workerName) =>
       handlePair(serverUrl, config, registered, companyId, workerName),
+    statuses,
   );
 
   const actualPort = await beacon.start(config.beaconPort);

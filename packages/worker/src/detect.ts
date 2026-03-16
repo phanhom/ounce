@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { readFile, access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +19,18 @@ export interface AdapterStatus {
   installHint?: string;
   authSteps?: string[];
   installSteps?: string[];
+  pairCode?: string;
+}
+
+const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+
+function generatePairCode(): string {
+  const bytes = randomBytes(10);
+  let code = "";
+  for (let i = 0; i < 10; i++) {
+    code += CODE_ALPHABET[bytes[i]! % CODE_ALPHABET.length];
+  }
+  return `PCLIP-${code}`;
 }
 
 interface Probe {
@@ -266,6 +279,7 @@ export async function detectCapabilities(
         auth: authResult.auth,
         authHint: authResult.hint,
         authSteps: probe.authSteps,
+        pairCode: authResult.auth === "ready" ? generatePairCode() : undefined,
       };
 
       if (authResult.auth === "ready") {
