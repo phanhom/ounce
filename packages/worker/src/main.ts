@@ -74,38 +74,58 @@ function banner(
   // ── Adapters ──
   console.log(hr("├", "┤"));
 
-  const installed = statuses.filter((s) => s.auth !== "not_installed");
+  const ready = statuses.filter((s) => s.auth === "ready");
+  const needsAuth = statuses.filter((s) => s.auth === "needs_auth");
   const notInstalled = statuses.filter((s) => s.auth === "not_installed");
+  const IW = W - 4;
 
-  const NAME_W = 14;
+  const subBox = (lines: string[]) => {
+    row(`  ${C.dim}┌${"─".repeat(IW - 2)}┐${C.reset}`);
+    for (const line of lines) {
+      const textPad = Math.max(0, IW - 4 - vlen(line));
+      row(`  ${C.dim}│${C.reset} ${line}${" ".repeat(textPad)} ${C.dim}│${C.reset}`);
+    }
+    row(`  ${C.dim}└${"─".repeat(IW - 2)}┘${C.reset}`);
+  };
 
-  if (installed.length > 0) {
+  if (ready.length > 0) {
     row(`  ${C.bold}Adapters${C.reset}`);
     blank();
-    for (const s of installed) {
-      const icon = s.auth === "ready" ? `${C.green}✓` : `${C.yellow}!`;
-      const tag = s.auth === "ready"
-        ? `${C.green}ready${C.reset}`
-        : `${C.yellow}needs auth${C.reset}`;
+    for (const s of ready) {
       const ver = s.version ? ` ${C.dim}(${s.version})${C.reset}` : "";
-      const left = `  ${icon}${C.reset} ${s.label}${ver}`;
+      const left = `  ${C.green}✓${C.reset} ${s.label}${ver}`;
+      const tag = `${C.green}ready${C.reset}`;
       const gap = Math.max(1, W - vlen(left) - vlen(tag) - 2);
       row(`${left}${" ".repeat(gap)}${tag}`);
-      if (s.auth === "needs_auth" && s.authHint) {
-        row(`      ${C.dim}→ ${s.authHint}${C.reset}`);
-      }
     }
   } else {
-    row(`  ${C.dim}No CLI tools detected${C.reset}`);
+    row(`  ${C.dim}No ready adapters${C.reset}`);
+  }
+
+  if (needsAuth.length > 0) {
+    console.log(hr("├", "┤"));
+    for (let i = 0; i < needsAuth.length; i++) {
+      const s = needsAuth[i]!;
+      const ver = s.version ? ` ${C.dim}(${s.version})${C.reset}` : "";
+      row(`  ${C.yellow}!${C.reset} ${C.bold}${s.label}${C.reset}${ver} ${C.dim}—${C.reset} ${C.yellow}needs auth${C.reset}`);
+      const steps = (s.authSteps ?? []).map(
+        (step, j) => `${C.dim}${j + 1}.${C.reset} ${step}`,
+      );
+      subBox(steps);
+      if (i < needsAuth.length - 1 || notInstalled.length > 0) blank();
+    }
   }
 
   if (notInstalled.length > 0) {
-    console.log(hr("├", "┤"));
-    row(`  ${C.bold}Install CLI tools${C.reset}`);
-    blank();
-    for (const s of notInstalled) {
-      if (!s.installHint) continue;
-      row(`    ${C.dim}${s.label.padEnd(NAME_W)}${C.reset}${C.green}${s.installHint}${C.reset}`);
+    if (needsAuth.length === 0) console.log(hr("├", "┤"));
+    for (let i = 0; i < notInstalled.length; i++) {
+      const s = notInstalled[i]!;
+      row(`  ${C.red}✗${C.reset} ${C.bold}${s.label}${C.reset} ${C.dim}—${C.reset} ${C.dim}not installed${C.reset}`);
+      const steps = (s.installSteps ?? []).map(
+        (step, j) => `${C.dim}${j + 1}.${C.reset} ${step}`,
+      );
+      subBox(steps);
+      if (i < notInstalled.length - 1) blank();
     }
   }
 
@@ -127,19 +147,6 @@ function banner(
   kv("Public key", tilde(getPublicKeyPath()));
 
   console.log(hr("└", "┘"));
-
-  // ── Warnings below box ──
-  const needsAuth = statuses.filter((s) => s.auth === "needs_auth");
-  if (needsAuth.length > 0) {
-    console.log("");
-    console.log(`  ${C.yellow}⚠  ${needsAuth.length} adapter(s) need authentication:${C.reset}`);
-    for (const s of needsAuth) {
-      console.log(`  ${C.dim}   ${s.label}: ${s.authHint ?? "check auth config"}${C.reset}`);
-    }
-    console.log("");
-    console.log(`  ${C.dim}Set API keys in ~/.paperclip/worker.json:${C.reset}`);
-    console.log(`  ${C.dim}{ "env": { "ANTHROPIC_API_KEY": "sk-…", "OPENAI_API_KEY": "sk-…" } }${C.reset}`);
-  }
 
   console.log("");
   console.log(`  ${C.dim}Tip: --verbose / -v for debug logging${C.reset}`);

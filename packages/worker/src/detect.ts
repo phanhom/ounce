@@ -16,6 +16,8 @@ export interface AdapterStatus {
   auth: AuthStatus;
   authHint?: string;
   installHint?: string;
+  authSteps?: string[];
+  installSteps?: string[];
 }
 
 interface Probe {
@@ -24,6 +26,8 @@ interface Probe {
   label: string;
   authEnvVars: string[];
   installHint: string;
+  authSteps: string[];
+  installSteps: string[];
   authCheckCommand?: { args: string[]; successPattern: RegExp; failPattern?: RegExp };
   checkCredentials?: () => Promise<boolean>;
 }
@@ -55,6 +59,16 @@ const PROBES: Record<string, Probe> = {
     label: "Claude Code",
     authEnvVars: ["ANTHROPIC_API_KEY"],
     installHint: "npm i -g @anthropic-ai/claude-code",
+    authSteps: [
+      'export ANTHROPIC_API_KEY="sk-…"',
+      "or run: claude auth login",
+      "Restart the worker",
+    ],
+    installSteps: [
+      "npm i -g @anthropic-ai/claude-code",
+      'export ANTHROPIC_API_KEY="sk-…" or: claude auth login',
+      "Restart the worker",
+    ],
     authCheckCommand: {
       args: ["auth", "status"],
       successPattern: /logged\s+in|authenticated|active|valid|email|account/i,
@@ -67,6 +81,15 @@ const PROBES: Record<string, Probe> = {
     label: "Codex",
     authEnvVars: ["OPENAI_API_KEY"],
     installHint: "npm i -g @openai/codex",
+    authSteps: [
+      'export OPENAI_API_KEY="sk-…"',
+      "Restart the worker",
+    ],
+    installSteps: [
+      "npm i -g @openai/codex",
+      'export OPENAI_API_KEY="sk-…"',
+      "Restart the worker",
+    ],
   },
   cursor: {
     command: "agent",
@@ -74,6 +97,16 @@ const PROBES: Record<string, Probe> = {
     label: "Cursor",
     authEnvVars: ["CURSOR_API_KEY"],
     installHint: "Install Cursor from https://cursor.com",
+    authSteps: [
+      "Run: agent auth login",
+      'or export CURSOR_API_KEY="…"',
+      "Restart the worker",
+    ],
+    installSteps: [
+      "Install Cursor from https://cursor.com",
+      "Run: agent auth login",
+      "Restart the worker",
+    ],
     checkCredentials: cursorHasAuth,
   },
   gemini_local: {
@@ -82,6 +115,16 @@ const PROBES: Record<string, Probe> = {
     label: "Gemini CLI",
     authEnvVars: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
     installHint: "npm i -g @google/gemini-cli",
+    authSteps: [
+      'export GEMINI_API_KEY="…" or GOOGLE_API_KEY="…"',
+      "or run: gemini auth login",
+      "Restart the worker",
+    ],
+    installSteps: [
+      "npm i -g @google/gemini-cli",
+      "gemini auth login",
+      "Restart the worker",
+    ],
     checkCredentials: geminiHasAuth,
   },
   opencode_local: {
@@ -90,6 +133,16 @@ const PROBES: Record<string, Probe> = {
     label: "OpenCode",
     authEnvVars: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
     installHint: "go install github.com/opencode-ai/opencode@latest",
+    authSteps: [
+      'export OPENAI_API_KEY="sk-…" or ANTHROPIC_API_KEY="sk-…"',
+      "or run: opencode auth login",
+      "Restart the worker",
+    ],
+    installSteps: [
+      "go install github.com/opencode-ai/opencode@latest",
+      'export OPENAI_API_KEY="sk-…" or ANTHROPIC_API_KEY="sk-…"',
+      "Restart the worker",
+    ],
   },
   pi_local: {
     command: "pi",
@@ -97,6 +150,15 @@ const PROBES: Record<string, Probe> = {
     label: "Pi",
     authEnvVars: ["ANTHROPIC_API_KEY", "XAI_API_KEY", "OPENAI_API_KEY"],
     installHint: "npm i -g @mariozechner/pi-coding-agent",
+    authSteps: [
+      'export ANTHROPIC_API_KEY="sk-…"',
+      "Restart the worker",
+    ],
+    installSteps: [
+      "npm i -g @mariozechner/pi-coding-agent",
+      'export ANTHROPIC_API_KEY="sk-…"',
+      "Restart the worker",
+    ],
   },
   kiro_local: {
     command: "kiro-cli",
@@ -104,6 +166,14 @@ const PROBES: Record<string, Probe> = {
     label: "Kiro CLI",
     authEnvVars: ["AWS_ACCESS_KEY_ID"],
     installHint: "curl -fsSL https://cli.kiro.dev/install | bash",
+    authSteps: [
+      'export AWS_ACCESS_KEY_ID="…"',
+      "Restart the worker",
+    ],
+    installSteps: [
+      "curl -fsSL https://cli.kiro.dev/install | bash",
+      "Restart the worker",
+    ],
   },
 };
 
@@ -195,6 +265,7 @@ export async function detectCapabilities(
         version: version || "ok",
         auth: authResult.auth,
         authHint: authResult.hint,
+        authSteps: probe.authSteps,
       };
 
       if (authResult.auth === "ready") {
@@ -214,6 +285,7 @@ export async function detectCapabilities(
           version: "",
           auth: "not_installed" as AuthStatus,
           installHint: probe.installHint,
+          installSteps: probe.installSteps,
         },
       };
     }
