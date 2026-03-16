@@ -12,7 +12,7 @@ const CONCURRENCY_LARGE = 256;
 const CLAMP_PREFIX = 16;              // anything broader than /16 gets clamped to /16
 
 export interface DiscoveredWorker {
-  ip: string;
+  host: string;
   port: number;
   hostname: string;
   platform: string;
@@ -128,7 +128,7 @@ async function fetchBeaconInfo(ip: string, port: number, timeoutMs: number): Pro
     if (data.service !== "paperclip-worker") return null;
 
     return {
-      ip,
+      host: ip,
       port,
       hostname: String(data.hostname ?? ""),
       platform: String(data.platform ?? ""),
@@ -339,8 +339,14 @@ export async function discoverWorkers(
     "starting LAN worker scan",
   );
 
-  const discovered = await scanIPs(allIPs, port, scanCfg);
-  const truncated = discovered.length >= limit;
+  const raw = await scanIPs(allIPs, port, scanCfg);
+  const seen = new Set<string>();
+  const discovered = raw.filter((w) => {
+    if (!w.fingerprint || seen.has(w.fingerprint)) return false;
+    seen.add(w.fingerprint);
+    return true;
+  });
+  const truncated = raw.length >= limit;
 
   logger.info(
     { found: discovered.length, scanned: allIPs.length, truncated },
