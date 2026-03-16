@@ -98,6 +98,13 @@ const PROBES: Record<string, Probe> = {
     authEnvVars: ["ANTHROPIC_API_KEY", "XAI_API_KEY", "OPENAI_API_KEY"],
     installHint: "npm i -g @mariozechner/pi-coding-agent",
   },
+  kiro_local: {
+    command: "kiro-cli",
+    args: ["--version"],
+    label: "Kiro CLI",
+    authEnvVars: ["AWS_ACCESS_KEY_ID"],
+    installHint: "curl -fsSL https://cli.kiro.dev/install | bash",
+  },
 };
 
 const ALWAYS_AVAILABLE = ["openclaw_gateway", "process", "http"];

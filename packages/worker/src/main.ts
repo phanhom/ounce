@@ -77,6 +77,8 @@ function banner(
   const installed = statuses.filter((s) => s.auth !== "not_installed");
   const notInstalled = statuses.filter((s) => s.auth === "not_installed");
 
+  const NAME_W = 14;
+
   if (installed.length > 0) {
     row(`  ${C.bold}Adapters${C.reset}`);
     blank();
@@ -93,19 +95,17 @@ function banner(
         row(`      ${C.dim}→ ${s.authHint}${C.reset}`);
       }
     }
-    if (notInstalled.length > 0) {
-      blank();
-      row(`  ${C.dim}Not found: ${notInstalled.map((s) => s.label).join(", ")}${C.reset}`);
-    }
   } else {
     row(`  ${C.dim}No CLI tools detected${C.reset}`);
+  }
+
+  if (notInstalled.length > 0) {
+    console.log(hr("├", "┤"));
+    row(`  ${C.bold}Install CLI tools${C.reset}`);
     blank();
-    row(`  ${C.bold}Install at least one to get started:${C.reset}`);
-    blank();
-    const NAME_W = 14;
     for (const s of notInstalled) {
       if (!s.installHint) continue;
-      row(`    ${C.cyan}▸${C.reset} ${C.bold}${s.label.padEnd(NAME_W)}${C.reset}${C.green}${s.installHint}${C.reset}`);
+      row(`    ${C.dim}${s.label.padEnd(NAME_W)}${C.reset}${C.green}${s.installHint}${C.reset}`);
     }
   }
 
