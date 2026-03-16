@@ -23,99 +23,126 @@ const C = {
 function banner(
   fingerprint: string,
   port: number,
-  capabilities: string[],
+  _capabilities: string[],
   statuses: AdapterStatus[],
   config: WorkerConfig,
 ): void {
   const ips = getLocalIPs();
-  const w = 61;
+  const W = 70;
+  const LW = 15;
+  const B = C.cyan;
 
-  console.log("");
-  console.log(`${C.cyan}┌${"─".repeat(w)}┐${C.reset}`);
-  console.log(`${C.cyan}│${C.reset}${C.bold}           Paperclip Remote Worker${C.reset}${" ".repeat(w - 33)}${C.cyan}│${C.reset}`);
-  console.log(`${C.cyan}├${"─".repeat(w)}┤${C.reset}`);
+  const vlen = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").length;
 
-  const row = (label: string, value: string, color = "") => {
-    const pad = w - label.length - value.length - 4;
-    console.log(`${C.cyan}│${C.reset} ${C.dim}${label}${C.reset} ${color}${value}${color ? C.reset : ""}${" ".repeat(Math.max(0, pad))}${C.cyan}│${C.reset}`);
+  const hr = (l: string, r: string) =>
+    `${B}${l}${"─".repeat(W)}${r}${C.reset}`;
+
+  const row = (content: string) => {
+    const pad = Math.max(0, W - vlen(content));
+    console.log(`${B}│${C.reset}${content}${" ".repeat(pad)}${B}│${C.reset}`);
   };
 
-  row("Platform", `${os.platform()} ${os.arch()} (Node ${process.version})`);
-  row("Hostname", os.hostname());
-  row("Concurrency", String(config.maxConcurrency));
-  row("Log Level", config.logLevel);
-  row("Beacon Port", String(port));
+  const blank = () => row("");
+
+  const kv = (label: string, value: string, vc = "") => {
+    const v = vc ? `${vc}${value}${C.reset}` : value;
+    row(`  ${C.dim}${label.padEnd(LW)}${C.reset}${v}`);
+  };
+
+  const tilde = (p: string) => {
+    const h = os.homedir();
+    return p.startsWith(h) ? "~" + p.slice(h.length) : p;
+  };
+
+  // ── Title ──
+  console.log("");
+  console.log(hr("┌", "┐"));
+  const title = "Paperclip Remote Worker";
+  const lpad = Math.floor((W - title.length) / 2);
+  row(`${" ".repeat(lpad)}${C.bold}${title}${C.reset}`);
+  console.log(hr("├", "┤"));
+
+  // ── System info ──
+  kv("Platform", `${os.platform()} ${os.arch()} (Node ${process.version})`);
+  kv("Hostname", os.hostname());
+  kv("Concurrency", String(config.maxConcurrency));
+  kv("Beacon Port", String(port));
   for (const ip of ips) {
-    row("LAN Address", `${ip}:${port}`, C.cyan);
+    kv("LAN Address", `${ip}:${port}`, C.cyan);
   }
 
-  console.log(`${C.cyan}├${"─".repeat(w)}┤${C.reset}`);
-  console.log(`${C.cyan}│${C.reset} ${C.bold}Adapters${C.reset}${" ".repeat(w - 9)}${C.cyan}│${C.reset}`);
+  // ── Adapters ──
+  console.log(hr("├", "┤"));
 
   const installed = statuses.filter((s) => s.auth !== "not_installed");
   const notInstalled = statuses.filter((s) => s.auth === "not_installed");
 
-  if (installed.length === 0) {
-    row("  (none)", "no CLI tools found", C.red);
-  }
-
-  for (const s of installed) {
-    const icon = s.auth === "ready" ? `${C.green}✓` : `${C.yellow}!`;
-    const tag = s.auth === "ready" ? `${C.green}ready` : `${C.yellow}needs auth`;
-    const ver = s.version ? ` (${s.version})` : "";
-    const pad = w - s.label.length - ver.length - 18;
-    console.log(
-      `${C.cyan}│${C.reset}  ${icon}${C.reset} ${s.label}${C.dim}${ver}${C.reset}${" ".repeat(Math.max(1, pad))}${tag}${C.reset}  ${C.cyan}│${C.reset}`,
-    );
-    if (s.auth === "needs_auth" && s.authHint) {
-      const hintLine = `    → ${s.authHint}`;
-      const hPad = w - hintLine.length;
-      console.log(`${C.cyan}│${C.reset}${C.dim}${hintLine}${C.reset}${" ".repeat(Math.max(0, hPad))}${C.cyan}│${C.reset}`);
+  if (installed.length > 0) {
+    row(`  ${C.bold}Adapters${C.reset}`);
+    blank();
+    for (const s of installed) {
+      const icon = s.auth === "ready" ? `${C.green}✓` : `${C.yellow}!`;
+      const tag = s.auth === "ready"
+        ? `${C.green}ready${C.reset}`
+        : `${C.yellow}needs auth${C.reset}`;
+      const ver = s.version ? ` ${C.dim}(${s.version})${C.reset}` : "";
+      const left = `  ${icon}${C.reset} ${s.label}${ver}`;
+      const gap = Math.max(1, W - vlen(left) - vlen(tag) - 2);
+      row(`${left}${" ".repeat(gap)}${tag}`);
+      if (s.auth === "needs_auth" && s.authHint) {
+        row(`      ${C.dim}→ ${s.authHint}${C.reset}`);
+      }
+    }
+    if (notInstalled.length > 0) {
+      blank();
+      row(`  ${C.dim}Not found: ${notInstalled.map((s) => s.label).join(", ")}${C.reset}`);
+    }
+  } else {
+    row(`  ${C.dim}No CLI tools detected${C.reset}`);
+    blank();
+    row(`  ${C.bold}Install at least one to get started:${C.reset}`);
+    blank();
+    const NAME_W = 14;
+    for (const s of notInstalled) {
+      if (!s.installHint) continue;
+      row(`    ${C.cyan}▸${C.reset} ${C.bold}${s.label.padEnd(NAME_W)}${C.reset}${C.green}${s.installHint}${C.reset}`);
     }
   }
 
-  if (notInstalled.length > 0) {
-    const names = notInstalled.map((s) => s.label).join(", ");
-    row("  Not found", names, C.dim);
-  }
-
-  console.log(`${C.cyan}├${"─".repeat(w)}┤${C.reset}`);
+  // ── Status ──
+  console.log(hr("├", "┤"));
 
   if (config.server) {
-    row("Server", config.server, C.green);
-    row("Status", "outbound connection active", C.green);
+    kv("Server", config.server, C.green);
+    kv("Status", "● connected", C.green);
   } else {
-    row("Status", "awaiting pairing...", C.yellow);
+    kv("Status", "● awaiting pairing…", C.yellow);
   }
 
-  console.log(`${C.cyan}├${"─".repeat(w)}┤${C.reset}`);
-  row("Fingerprint", fingerprint, C.magenta);
-  console.log(`${C.cyan}│${C.reset}${" ".repeat(w)}${C.cyan}│${C.reset}`);
-  console.log(`${C.cyan}│${C.reset} ${C.dim}Use this fingerprint to verify the worker identity${C.reset}${" ".repeat(w - 52)}${C.cyan}│${C.reset}`);
-  console.log(`${C.cyan}│${C.reset} ${C.dim}when pairing from the Paperclip UI.${C.reset}${" ".repeat(w - 36)}${C.cyan}│${C.reset}`);
-  console.log(`${C.cyan}│${C.reset}${" ".repeat(w)}${C.cyan}│${C.reset}`);
+  // ── Identity ──
+  console.log(hr("├", "┤"));
 
-  const privPath = getPrivateKeyPath();
-  const pubPath = getPublicKeyPath();
-  const privLine = ` ${C.dim}Private key:${C.reset} ${privPath}`;
-  const pubLine = ` ${C.dim}Public key:${C.reset}  ${pubPath}`;
-  console.log(`${C.cyan}│${C.reset}${privLine}`.padEnd(72 + 13) + `${C.cyan}│${C.reset}`);
-  console.log(`${C.cyan}│${C.reset}${pubLine}`.padEnd(72 + 13) + `${C.cyan}│${C.reset}`);
-  console.log(`${C.cyan}└${"─".repeat(w)}┘${C.reset}`);
+  kv("Fingerprint", fingerprint, C.magenta);
+  kv("Private key", tilde(getPrivateKeyPath()));
+  kv("Public key", tilde(getPublicKeyPath()));
 
+  console.log(hr("└", "┘"));
+
+  // ── Warnings below box ──
   const needsAuth = statuses.filter((s) => s.auth === "needs_auth");
   if (needsAuth.length > 0) {
     console.log("");
-    console.log(`${C.yellow}  ⚠ ${needsAuth.length} adapter(s) need authentication:${C.reset}`);
+    console.log(`  ${C.yellow}⚠  ${needsAuth.length} adapter(s) need authentication:${C.reset}`);
     for (const s of needsAuth) {
-      console.log(`${C.yellow}    ${s.label}: ${s.authHint ?? "check auth configuration"}${C.reset}`);
+      console.log(`  ${C.dim}   ${s.label}: ${s.authHint ?? "check auth config"}${C.reset}`);
     }
-    console.log(`${C.dim}  You can also set API keys in ~/.paperclip/worker.json under "env":${C.reset}`);
-    console.log(`${C.dim}  { "env": { "ANTHROPIC_API_KEY": "sk-...", "OPENAI_API_KEY": "sk-..." } }${C.reset}`);
+    console.log("");
+    console.log(`  ${C.dim}Set API keys in ~/.paperclip/worker.json:${C.reset}`);
+    console.log(`  ${C.dim}{ "env": { "ANTHROPIC_API_KEY": "sk-…", "OPENAI_API_KEY": "sk-…" } }${C.reset}`);
   }
 
   console.log("");
-  console.log(`${C.dim}  Tip: Use --verbose or -v for debug-level logging (frame tracing)${C.reset}`);
+  console.log(`  ${C.dim}Tip: --verbose / -v for debug logging${C.reset}`);
   console.log("");
 }
 

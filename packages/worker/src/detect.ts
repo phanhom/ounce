@@ -12,6 +12,7 @@ export interface AdapterStatus {
   version: string;
   auth: AuthStatus;
   authHint?: string;
+  installHint?: string;
 }
 
 interface Probe {
@@ -19,6 +20,7 @@ interface Probe {
   args: string[];
   label: string;
   authEnvVars: string[];
+  installHint: string;
   authCheckCommand?: { args: string[]; successPattern: RegExp; failPattern?: RegExp };
 }
 
@@ -28,6 +30,7 @@ const PROBES: Record<string, Probe> = {
     args: ["--version"],
     label: "Claude Code",
     authEnvVars: ["ANTHROPIC_API_KEY"],
+    installHint: "npm i -g @anthropic-ai/claude-code",
     authCheckCommand: {
       args: ["auth", "status"],
       successPattern: /logged\s+in|authenticated|active|valid/i,
@@ -39,30 +42,35 @@ const PROBES: Record<string, Probe> = {
     args: ["--version"],
     label: "Codex",
     authEnvVars: ["OPENAI_API_KEY"],
+    installHint: "npm i -g @openai/codex",
   },
   cursor: {
     command: "agent",
     args: ["--version"],
     label: "Cursor",
     authEnvVars: ["CURSOR_API_KEY"],
+    installHint: "Install Cursor from https://cursor.com",
   },
   gemini_local: {
     command: "gemini",
     args: ["--version"],
     label: "Gemini CLI",
     authEnvVars: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+    installHint: "npm i -g @google/gemini-cli",
   },
   opencode_local: {
     command: "opencode",
     args: ["version"],
     label: "OpenCode",
     authEnvVars: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
+    installHint: "go install github.com/opencode-ai/opencode@latest",
   },
   pi_local: {
     command: "pi",
     args: ["--version"],
     label: "Pi",
     authEnvVars: ["ANTHROPIC_API_KEY", "XAI_API_KEY", "OPENAI_API_KEY"],
+    installHint: "npm i -g @mariozechner/pi-coding-agent",
   },
 };
 
@@ -147,6 +155,7 @@ export async function detectCapabilities(
           label: probe.label,
           version: "",
           auth: "not_installed" as AuthStatus,
+          installHint: probe.installHint,
         },
       };
     }
