@@ -192,6 +192,10 @@ const PROBES: Record<string, Probe> = {
 
 const ALWAYS_AVAILABLE = ["openclaw_gateway", "process", "http"];
 
+const BUILT_IN_ADAPTERS: Array<{ adapterType: string; label: string }> = [
+  { adapterType: "openclaw_gateway", label: "OpenClaw" },
+];
+
 // ── Auth checking ───────────────────────────────────────────────────
 
 async function checkAuth(
@@ -264,6 +268,16 @@ export async function detectCapabilities(
   log.info("detect", "Scanning for installed CLI tools and auth status...");
   const capabilities = [...ALWAYS_AVAILABLE];
   const statuses: AdapterStatus[] = [];
+
+  for (const built of BUILT_IN_ADAPTERS) {
+    statuses.push({
+      adapterType: built.adapterType,
+      label: built.label,
+      version: "built-in",
+      auth: "ready",
+      pairCode: generatePairCode(),
+    });
+  }
 
   const probes = Object.entries(PROBES).map(async ([adapterType, probe]) => {
     try {
