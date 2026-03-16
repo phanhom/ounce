@@ -50,6 +50,11 @@ const PROBES: Record<string, Probe> = {
     label: "Cursor",
     authEnvVars: ["CURSOR_API_KEY"],
     installHint: "Install Cursor from https://cursor.com",
+    authCheckCommand: {
+      args: ["auth", "status"],
+      successPattern: /logged\s+in|authenticated|active|valid|authorized|email|token/i,
+      failPattern: /not\s+logged\s+in|not\s+authenticated|login\s+required|unauthorized|no\s+auth/i,
+    },
   },
   gemini_local: {
     command: "gemini",
@@ -57,6 +62,11 @@ const PROBES: Record<string, Probe> = {
     label: "Gemini CLI",
     authEnvVars: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
     installHint: "npm i -g @google/gemini-cli",
+    authCheckCommand: {
+      args: ["auth", "status"],
+      successPattern: /logged\s+in|authenticated|active|valid|authorized|account|email|token/i,
+      failPattern: /not\s+logged\s+in|not\s+authenticated|login\s+required|unauthorized|no\s+auth/i,
+    },
   },
   opencode_local: {
     command: "opencode",
@@ -64,6 +74,11 @@ const PROBES: Record<string, Probe> = {
     label: "OpenCode",
     authEnvVars: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
     installHint: "go install github.com/opencode-ai/opencode@latest",
+    authCheckCommand: {
+      args: ["auth", "status"],
+      successPattern: /logged\s+in|authenticated|active|valid|authorized|email|token/i,
+      failPattern: /not\s+logged\s+in|not\s+authenticated|login\s+required|unauthorized|no\s+auth/i,
+    },
   },
   pi_local: {
     command: "pi",
@@ -97,15 +112,17 @@ async function checkAuth(
         env: mergedEnv,
       });
       const combined = `${stdout}\n${stderr}`;
-      if (probe.authCheckCommand.successPattern.test(combined)) {
-        return { auth: "ready" };
-      }
       if (probe.authCheckCommand.failPattern?.test(combined)) {
         return {
           auth: "needs_auth",
           hint: `Run \`${command} auth login\` or set ${probe.authEnvVars.join("/")}`,
         };
       }
+      if (probe.authCheckCommand.successPattern.test(combined)) {
+        return { auth: "ready" };
+      }
+      // Command ran successfully without matching fail pattern — assume authenticated
+      return { auth: "ready" };
     } catch {
       // auth check command failed or doesn't exist — fall through
     }
